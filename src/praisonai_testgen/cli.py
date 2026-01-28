@@ -53,6 +53,7 @@ def generate(
     target: str = typer.Argument(..., help="File or directory to generate tests for"),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Output directory"),
     function: Optional[str] = typer.Option(None, "--function", "-f", help="Specific function"),
+    smart: bool = typer.Option(False, "--smart", "-s", help="Use LLM for smarter test generation"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Generate tests for Python code."""
@@ -62,10 +63,11 @@ def generate(
     if function:
         target = f"{target}::{function}"
     
-    typer.echo(f"🔍 Analyzing {target}...")
+    mode = "🧠 Smart" if smart else "⚡ Fast"
+    typer.echo(f"🔍 Analyzing {target}... ({mode} mode)")
     
     testgen = TestGen()
-    result = testgen.generate(target, output_dir=output)
+    result = testgen.generate(target, output_dir=output, use_llm=smart)
     
     if result.success:
         typer.echo(f"✓ Generated {len(result.tests)} tests")

@@ -386,11 +386,93 @@ def validate_test_quality(test_code: str) -> dict:
         }
 
 
+@tool
+def generate_test_code_llm(function_info: dict, source_code: str = "") -> str:
+    """
+    Generate pytest test code using LLM for smarter, context-aware tests.
+    
+    Args:
+        function_info: Dictionary with function metadata from parse_python_ast
+        source_code: Optional source code of the function for better context
+        
+    Returns:
+        Generated pytest test code as string
+    """
+    from praisonaiagents import Agent
+    
+    name = function_info.get("name", "unknown")
+    args = function_info.get("args", [])
+    arg_types = function_info.get("arg_types", {})
+    return_type = function_info.get("return_type", "")
+    docstring = function_info.get("docstring", "")
+    defaults = function_info.get("defaults", {})
+    
+    # Build context for the LLM
+    context = f"""
+Function to test: {name}
+Arguments: {', '.join(f'{a}: {arg_types.get(a, "Any")}' for a in args)}
+Return type: {return_type or 'Not specified'}
+Docstring: {docstring or 'None'}
+Default values: {defaults or 'None'}
+"""
+    
+    if source_code:
+        context += f"\nSource code:\n```python\n{source_code}\n```"
+    
+    # Create a mini agent for test generation
+    test_generator = Agent(
+        name="TestWriter",
+        instructions="""You are a pytest expert. Generate comprehensive test code.
+
+RULES:
+1. Output ONLY valid Python pytest code - no explanations
+2. Include actual assertions based on the function's logic
+3. Test happy path AND edge cases
+4. Use descriptive test names
+5. Follow AAA pattern: Arrange, Act, Assert
+6. If the function does math, test with real numbers and verify results
+7. If the function processes strings, test with various inputs
+8. Include docstrings for each test
+
+DO NOT include:
+- Markdown formatting
+- Code block markers
+- Explanations
+- Import statements (except pytest)
+
+Output ONLY the test functions.""",
+    )
+    
+    # Generate tests using the agent
+    try:
+        response = test_generator.chat(f"""Generate pytest tests for this function:
+
+{context}
+
+Generate 2-3 test functions with real assertions that verify the function's behavior.""")
+        
+        # Extract just the test code
+        result = str(response)
+        
+        # Clean up any markdown formatting
+        if "```python" in result:
+            result = result.split("```python")[1].split("```")[0]
+        elif "```" in result:
+            result = result.split("```")[1].split("```")[0]
+        
+        return result.strip()
+        
+    except Exception as e:
+        # Fallback to template-based generation
+        return generate_test_code(function_info)
+
+
 __all__ = [
     "parse_python_ast",
     "infer_types",
     "extract_source_code",
     "generate_test_code",
+    "generate_test_code_llm",
     "create_fixtures",
     "run_pytest",
     "run_pytest_isolated",

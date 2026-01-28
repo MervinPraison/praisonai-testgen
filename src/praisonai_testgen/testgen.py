@@ -58,6 +58,7 @@ class TestGen:
         target: str,
         output_dir: Optional[str] = None,
         use_agents: bool = False,
+        use_llm: bool = False,
         **kwargs: Any,
     ) -> GenerationResult:
         """
@@ -66,7 +67,8 @@ class TestGen:
         Args:
             target: Path to file or "file.py::function" for specific function
             output_dir: Where to write tests (default: config.test_dir)
-            use_agents: If True, use full agent workflow. If False, use direct tools.
+            use_agents: If True, use full agent workflow
+            use_llm: If True, use LLM for smarter test generation
             **kwargs: Additional options
             
         Returns:
@@ -82,16 +84,23 @@ class TestGen:
         if use_agents:
             return self._generate_with_agents(file_path, function_name, output_dir)
         else:
-            return self._generate_direct(file_path, function_name, output_dir)
+            return self._generate_direct(file_path, function_name, output_dir, use_llm=use_llm)
     
     def _generate_direct(
         self,
         file_path: str,
         function_name: Optional[str],
         output_dir: Optional[str],
+        use_llm: bool = False,
     ) -> GenerationResult:
         """Generate tests using direct tool calls (faster, deterministic)."""
-        from .tools import parse_python_ast, generate_test_code, run_pytest_isolated
+        from .tools import (
+            parse_python_ast, 
+            generate_test_code, 
+            generate_test_code_llm,
+            extract_source_code,
+            run_pytest_isolated,
+        )
         
         try:
             # Step 1: Parse the file
@@ -120,7 +129,13 @@ class TestGen:
                 if func_info.get("is_private", False):
                     continue
                 
-                test_code = generate_test_code(func_info)
+                if use_llm:
+                    # Get source code for better context
+                    source = extract_source_code(file_path, func_info["name"])
+                    test_code = generate_test_code_llm(func_info, source)
+                else:
+                    test_code = generate_test_code(func_info)
+                    
                 tests.append(test_code)
             
             # Step 4: Validate tests compile
