@@ -8,9 +8,11 @@ from praisonaiagents import Agent
 from .tools import (
     parse_python_ast,
     infer_types,
+    extract_source_code,
     generate_test_code,
     create_fixtures,
     run_pytest,
+    run_pytest_isolated,
     validate_test_quality,
 )
 
@@ -21,17 +23,20 @@ from .tools import (
 analyzer = Agent(
     name="Analyzer",
     instructions="""Parse Python code and identify all testable functions and classes.
-    
+
 For each function/method, extract:
 - Function name and signature
-- Parameters with types (if available)
-- Return type (if available)  
+- Parameters with types (if available) 
+- Return type (if available)
 - Docstring and examples
-- Dependencies and imports
-- Edge cases from docstrings
+- Default argument values
+- Decorators
 
-Output a structured analysis that the Generator can use.""",
-    tools=[parse_python_ast, infer_types],
+Use the parse_python_ast tool to analyze files. Use extract_source_code to get 
+the full source of specific functions when needed.
+
+Output a structured analysis that the Generator can use to create tests.""",
+    tools=[parse_python_ast, infer_types, extract_source_code],
 )
 
 generator = Agent(
@@ -44,9 +49,14 @@ For each function, generate tests that cover:
 - Error handling (invalid inputs, exceptions)
 - Type variations if applicable
 
-Use pytest fixtures for common setup.
-Include descriptive test names and docstrings.
-Follow pytest best practices.""",
+Use the generate_test_code tool to create test templates, then enhance them
+with meaningful assertions. Use create_fixtures for test dependencies.
+
+Generated tests MUST:
+1. Be valid Python/pytest syntax
+2. Have actual assertions (not just 'pass' or 'assert True')
+3. Follow AAA pattern: Arrange, Act, Assert
+4. Include descriptive test names and docstrings""",
     tools=[generate_test_code, create_fixtures],
 )
 
@@ -56,13 +66,16 @@ validator = Agent(
 
 Check that tests:
 1. Compile without syntax errors
-2. Pass when executed with pytest
+2. Pass when executed with pytest (use run_pytest_isolated)
 3. Have meaningful assertions (not just 'assert True')
 4. Follow pytest conventions
-5. Achieve reasonable coverage
+5. Provide good coverage
+
+Use run_pytest_isolated to test code in isolation. Use validate_test_quality
+to check code quality with AI judgment.
 
 Provide specific feedback for any failures so Generator can improve.""",
-    tools=[run_pytest, validate_test_quality],
+    tools=[run_pytest, run_pytest_isolated, validate_test_quality],
 )
 
 __all__ = ["analyzer", "generator", "validator"]

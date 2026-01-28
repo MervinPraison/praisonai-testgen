@@ -6,6 +6,8 @@ These tools are shared across agents for code analysis, generation, and validati
 
 import ast
 import subprocess
+import tempfile
+from pathlib import Path
 from typing import Any
 from praisonaiagents import tool
 
@@ -43,6 +45,24 @@ def parse_python_ast(file_path: str) -> dict:
             # Extract return annotation if present
             if node.returns:
                 func_info["return_type"] = ast.unparse(node.returns)
+            
+            # Extract argument types
+            arg_types = {}
+            for arg in node.args.args:
+                if arg.arg != "self" and arg.annotation:
+                    arg_types[arg.arg] = ast.unparse(arg.annotation)
+            if arg_types:
+                func_info["arg_types"] = arg_types
+            
+            # Extract default values
+            defaults = {}
+            # node.args.defaults are aligned to the END of args list
+            args_with_defaults = node.args.args[-len(node.args.defaults):] if node.args.defaults else []
+            for arg, default in zip(args_with_defaults, node.args.defaults):
+                if arg.arg != "self":
+                    defaults[arg.arg] = ast.unparse(default)
+            if defaults:
+                func_info["defaults"] = defaults
             
             functions.append(func_info)
             
@@ -135,6 +155,37 @@ def infer_types(code: str) -> dict:
 
 
 @tool
+def extract_source_code(file_path: str, function_name: str) -> str:
+    """
+    Extract the source code of a specific function from a file.
+    
+    Args:
+        file_path: Path to the Python file
+        function_name: Name of the function to extract
+        
+    Returns:
+        Source code of the function as a string
+    """
+    with open(file_path) as f:
+        source = f.read()
+    
+    tree = ast.parse(source)
+    source_lines = source.splitlines(keepends=True)
+    
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == function_name:
+            # Get the line range
+            start_line = node.lineno - 1  # 0-indexed
+            end_line = node.end_lineno if hasattr(node, 'end_lineno') else start_line + 1
+            
+            # Extract and return the source
+            func_source = "".join(source_lines[start_line:end_line])
+            return func_source.strip()
+    
+    return ""
+
+
+@tool
 def generate_test_code(function_info: dict) -> str:
     """
     Generate pytest test code for a function.
@@ -147,20 +198,74 @@ def generate_test_code(function_info: dict) -> str:
     """
     name = function_info.get("name", "unknown")
     args = function_info.get("args", [])
+    arg_types = function_info.get("arg_types", {})
+    return_type = function_info.get("return_type", "")
     docstring = function_info.get("docstring", "")
+    defaults = function_info.get("defaults", {})
     
-    # Generate test template
+    # Generate sample values based on types
+    sample_values = {}
+    for arg in args:
+        arg_type = arg_types.get(arg, "")
+        default = defaults.get(arg)
+        
+        if default:
+            sample_values[arg] = default
+        elif arg_type == "int":
+            sample_values[arg] = "1"
+        elif arg_type == "float":
+            sample_values[arg] = "1.0"
+        elif arg_type == "str":
+            sample_values[arg] = '"test"'
+        elif arg_type == "bool":
+            sample_values[arg] = "True"
+        elif arg_type == "list":
+            sample_values[arg] = "[]"
+        elif arg_type == "dict":
+            sample_values[arg] = "{}"
+        else:
+            sample_values[arg] = "None"
+    
+    # Build argument string
+    arg_assignments = "\n    ".join(
+        f"{arg} = {sample_values.get(arg, 'None')}"
+        for arg in args
+    )
+    
+    # Build call string
+    call_args = ", ".join(args)
+    
+    # Generate test code with actual assertions
     test_code = f'''def test_{name}_basic():
     """Test {name} with basic inputs."""
-    # TODO: Replace with actual test implementation
-    # Function signature: {name}({", ".join(args)})
-    # Docstring: {docstring[:100] if docstring else "None"}
-    
     # Arrange
-    # Act  
+    {arg_assignments if arg_assignments else "pass  # No arguments"}
+    
+    # Act
+    result = {name}({call_args})
+    
     # Assert
-    pass
+    assert result is not None  # Basic assertion - replace with specific checks
 '''
+    
+    # Add edge case tests if we have type info
+    if arg_types:
+        edge_test = f'''
+
+def test_{name}_edge_cases():
+    """Test {name} edge cases."""
+    # Test with edge values based on types
+'''
+        for arg, arg_type in arg_types.items():
+            if arg_type == "int":
+                edge_test += f"    # {arg}: test with 0, negative, large values\n"
+            elif arg_type == "str":
+                edge_test += f"    # {arg}: test with empty string, whitespace\n"
+            elif arg_type == "list":
+                edge_test += f"    # {arg}: test with empty list, single item\n"
+        
+        edge_test += "    assert True  # TODO: implement edge case tests\n"
+        test_code += edge_test
     
     return test_code
 
@@ -209,10 +314,42 @@ def run_pytest(test_file: str) -> dict:
     
     return {
         "passed": result.returncode == 0,
-        "returncode": result.returncode,
+        "exit_code": result.returncode,
         "stdout": result.stdout,
         "stderr": result.stderr,
     }
+
+
+@tool
+def run_pytest_isolated(test_code: str) -> dict:
+    """
+    Execute pytest on test code in an isolated temporary directory.
+    
+    Args:
+        test_code: Python test code to execute
+        
+    Returns:
+        Dictionary with pass/fail status, exit code, and output
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Write test code to temp file
+        test_file = Path(tmpdir) / "test_temp.py"
+        test_file.write_text(test_code)
+        
+        # Run pytest
+        result = subprocess.run(
+            ["pytest", str(test_file), "-v", "--tb=short", "-s"],
+            capture_output=True,
+            text=True,
+            cwd=tmpdir,
+        )
+        
+        return {
+            "passed": result.returncode == 0,
+            "exit_code": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
 
 
 @tool
@@ -251,9 +388,11 @@ def validate_test_quality(test_code: str) -> dict:
 
 __all__ = [
     "parse_python_ast",
-    "infer_types", 
+    "infer_types",
+    "extract_source_code",
     "generate_test_code",
     "create_fixtures",
     "run_pytest",
+    "run_pytest_isolated",
     "validate_test_quality",
 ]

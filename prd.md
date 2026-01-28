@@ -88,6 +88,108 @@ PraisonAI TestGen leverages existing battle-tested packages rather than reinvent
 
 ---
 
+## Development Principles
+
+> **These principles are MANDATORY for all development work on TestGen.**
+
+### 1. TDD (Test-Driven Development)
+
+```
+RED → GREEN → REFACTOR
+```
+
+| Step | Action | Rule |
+|------|--------|------|
+| **RED** | Write failing test first | NO production code without a test |
+| **GREEN** | Write minimal code to pass | Only enough to make the test pass |
+| **REFACTOR** | Clean up code | Keep tests green |
+
+**TDD Rules:**
+- Every feature starts with a test
+- Tests must fail before implementation
+- Tests must be in `tests/` directory matching source structure
+- Run `pytest -x` after every change
+
+### 2. DRY (Don't Repeat Yourself)
+
+```
+REUSE → EXTEND → CREATE (last resort)
+```
+
+| Priority | Action | When |
+|----------|--------|------|
+| **1st** | Reuse | Use existing code from `praisonaiagents` or `testagent` |
+| **2nd** | Extend | Subclass or wrap existing functionality |
+| **3rd** | Create | Only if nothing exists to reuse |
+
+**DRY Rules:**
+- Check `praisonaiagents` before writing any agent code
+- Check `testagent` before writing any validation code
+- No duplicate logic - extract to shared functions
+- Single source of truth for all configs
+
+### 3. Agent-Centric Design
+
+```
+MINI AGENT PATTERN: name + instructions + tools
+```
+
+| Component | Keep | Avoid |
+|-----------|------|-------|
+| `name` | ✅ Required | - |
+| `instructions` | ✅ Required | `role`, `goal`, `backstory` |
+| `tools` | ✅ Optional | Inline logic in agents |
+| Defaults | ✅ Use them | Over-configuration |
+
+**Agent-Centric Rules:**
+- Agents are the primary abstraction
+- All business logic lives in `@tool` functions
+- Agents only orchestrate - they don't contain logic
+- Use `Agents` for multi-agent workflows
+
+### 4. Minimal Work, Huge Impact
+
+```
+80/20 RULE: 20% effort → 80% value
+```
+
+| Principle | Do | Don't |
+|-----------|-----|-------|
+| **Focus** | Core functionality first | Edge cases upfront |
+| **Iterate** | Small, working increments | Big bang releases |
+| **Validate** | Test with real usage | Over-engineer |
+| **Ship** | Working > Perfect | Wait for perfection |
+
+**Minimal Work Rules:**
+- Each PR delivers user-visible value
+- Maximum 200 lines per PR (excluding tests)
+- If it takes >2 hours, break it down
+- Prefer simple solutions over clever ones
+
+### 5. Code Quality Standards
+
+```python
+# ✅ GOOD: Clear, simple, tested
+@tool
+def parse_function(code: str) -> dict:
+    """Parse Python function and extract metadata."""
+    tree = ast.parse(code)
+    return {"name": ..., "args": ...}
+
+# ❌ BAD: Complex, untested, unclear
+def do_stuff(x):
+    # 100 lines of nested logic
+    pass
+```
+
+**Quality Rules:**
+- All functions have docstrings
+- All public APIs have type hints
+- Cyclomatic complexity < 10
+- Test coverage > 80%
+
+---
+
 ## DRY Architecture
 
 ### Design Philosophy
